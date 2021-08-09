@@ -5,10 +5,10 @@
 * Explanation
   This code example first creates a randomised electronic circuit, then `solves' the circuit by calculating the voltage and current over each component.
   This is acheived by converting a description of the circuit to a linear system of equations and then solving that system.
-  Included are two CPU implemenations of this, one using Gaussian Elimination ([[./simulate/include/solve/basic_gaussian.hpp]]) and one using LU decomposition ([[https://en.wikipedia.org/wiki/LU_decomposition#Using_Gaussian_elimination]]) ([[./simulate/include/solve/gaussian_lu.hpp]]).
-  There is also in implemenation of LU decomposition using SYCL ([[./simulate/include/solve/sycl_gaussian_lu.hpp]]) which I think will be of most interest.
+  Included are two CPU implementations of this, one using Gaussian Elimination ([[./simulate/include/solve/basic_gaussian.hpp]]) and one using LU decomposition ([[https://en.wikipedia.org/wiki/LU_decomposition#Using_Gaussian_elimination]]) ([[./simulate/include/solve/gaussian_lu.hpp]]).
+  There is also in implementation of LU decomposition using SYCL ([[./simulate/include/solve/sycl_gaussian_lu.hpp]]) which I think will be of most interest.
 
-  I have also included some notes on some basic performance work I did for the SYCL implemenation.
+  I have also included some notes on some basic performance work I did for the SYCL implementation.
 
   This work is part of my MSc project investigating the suitability of SYCL for solving these problems, as well as for scientific computing in general.
   
@@ -334,7 +334,7 @@ build\simulate\test\Release\simulate_test.exe
     [[./images/SYCL-mem-usage-in-order.PNG]]
 
     It seems to rise a lot over time, as if I had a memory leak. I am really not sure why this is.
-    Since in-order queue isn't directly portable to ComputeCpp, I will leave this out of my implemenation.
+    Since in-order queue isn't directly portable to ComputeCpp, I will leave this out of my implementation.
     
 *** All together
     
