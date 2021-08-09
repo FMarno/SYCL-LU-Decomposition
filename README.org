@@ -1,0 +1,379 @@
+#+TITLE: Code Example: LU Decomposition in SYCL
+#+Author: Finlay Marno
+#+LATEX_HEADER: \makeatletter \@ifpackageloaded{geometry}{\geometry{margin=2cm}}{\usepackage[margin=2cm]{geometry}} \makeatother
+
+* Explanation
+  This code example first creates a randomised electronic circuit, then `solves' the circuit by calculating the voltage and current over each component.
+  This is acheived by converting a description of the circuit to a linear system of equations and then solving that system.
+  Included are two CPU implemenations of this, one using Gaussian Elimination ([[./simulate/include/solve/basic_gaussian.hpp]]) and one using LU decomposition ([[https://en.wikipedia.org/wiki/LU_decomposition#Using_Gaussian_elimination]]) ([[./simulate/include/solve/gaussian_lu.hpp]]).
+  There is also in implemenation of LU decomposition using SYCL ([[./simulate/include/solve/sycl_gaussian_lu.hpp]]) which I think will be of most interest.
+
+  I have also included some notes on some basic performance work I did for the SYCL implemenation.
+
+  This work is part of my MSc project investigating the suitability of SYCL for solving these problems, as well as for scientific computing in general.
+  
+
+* Build
+  The build has been set up to work with DPC++ and ComputeCpp on Windows, unfortunately the ComputeCpp build isn't currently working.
+** Dependencies
+   * C++17
+   * SYCL
+   * CMAKE
+
+
+** DPC++ on Windows
+   Install the OneApi base toolkit and any required dependencies https://software.intel.com/content/www/us/en/develop/tools/oneapi/base-toolkit/download.html
+
+   You should now have a program named something like "Intel OneAPI command prompt...". 
+   Run the commands and exe in that command prompt (it correctly configures the environment).
+
+   Configure the CMake build folder using the oneAPI toolchain
+   #+BEGIN_SRC
+cmake -S. -Bbuild -T "Intel(R) oneAPI DPC++ Compiler"
+   #+END_SRC
+
+   You can now open the solution at build/sycl-circuits.sln in Visual Studio, or continue in the command prompt
+
+   #+BEGIN_SRC
+cmake --build build --config Release
+build\simulate\Release\simulate.exe
+   #+END_SRC
+
+** ComputeCpp on Windows - Currently Broken
+   First configure the CMake build folder
+   #+BEGIN_SRC
+cmake -S. -Bbuild -DSYCL_IMPL=COMPUTECPP -DComputeCpp_DIR="C:/Program Files/Codeplay/ComputeCpp"
+   #+END_SRC
+   * On windows SYCL is supported through Visual Studio. Either open the project folder in Visual Studio or use the Developer Powershell for VS 2019 (or similar).
+   * Choose the ComputeCpp build path with ~-DSYCL_IMPL=COMPUTECPP~
+   * ComputeCPP expects a ~ComputeCpp_DIR~ cmake variable e.g. ~-DComputeCpp_DIR="C:/Program Files/Codeplay/ComputeCpp/"~.
+   * ComputeCPP SYCL does not support ptx64 backend (Nvidia) anymore but you can enable it anyway with ~-DCOMPUTECPP_BITCODE=ptx64~.
+   * To export the compile commands for the clangd language server add ~-DCMAKE_EXPORT_COMPILE_COMMANDS=1~. =compile_commands.json= will then be found in the build folder, so I suggest creating a soft symlink to the project root. (helpful for code completion with vim or emacs etc).
+
+   Next build:
+   #+BEGIN_SRC
+cmake --build build --config Release
+   #+END_SRC
+   * ComputeCPP on windows only works in release mode. To do a release build with visual studio, add ~--config Release~ to the build step i.e. ~cmake --build build --config Release~
+
+   Then run with:
+   #+BEGIN_SRC
+build\simulate\Release\simulate.exe
+   #+END_SRC
+
+
+** Test
+   First build the project, then:
+   #+BEGIN_SRC 
+build\simulate\test\Release\simulate_test.exe
+   #+END_SRC
+
+* Performance
+  Note: this is not particularly scientific and isn't intended to be. 
+** Performance - Part 1
+   After the first implementation of SYCL LU factorisation, I tried a few different changes in an attempt to improve performance, which yeilded these time:
+
+   | Run                 | warmup |     1 |     2 |     3 |     4 |  mean |
+   |---------------------+--------+-------+-------+-------+-------+-------|
+   | /                   |      < |     < |       |       |       |       |
+   | Basic Gaussian      |   0.38 |  0.39 |  0.38 |  0.37 |  0.37 |  0.38 |
+   | Gaussian LU         |   0.39 |  0.38 |  0.39 |  0.39 |  0.39 |  0.39 |
+   | Original SYCL       |  23.76 | 31.26 | 30.85 | 30.60 | 30.40 | 30.78 |
+   | Upfront Bufffers    |  17.43 | 21.15 | 21.07 | 20.46 | 20.75 | 20.86 |
+   | Shared Queue        |  19.35 | 29.16 | 28.52 | 28.47 | 28.38 | 28.63 |
+   | In-Order Queue      |  21.59 | 30.57 | 30.37 | 30.72 | 31.37 | 30.76 |
+   | All except In-Order |  12.46 | 20.25 | 19.50 | 19.90 | 19.52 | 19.79 |
+   | All                 |  10.87 | 19.16 | 18.87 | 18.71 | 18.60 | 18.83 |
+   #+TBLFM: $7=vmean($3..$6)
+      
+   Where each time represents solving 10 circuits with roughly 100 nodes and 300 branches.
+   Following is an explaination of the different changes made.
+   Each of the following changes were done on seperate branches, then put together in the end.
+
+*** A quick note on thermals
+    
+    Something odd is that the first of the SYCL runs is always faster than the rest.
+    My current working theory is that my laptop became thermally throttled after a while, leading to reduced performance.
+    To test that theory, I ran the executable again immediately after the run and found that all algorithms performed worse, including CPU based ones:
+     
+    #+BEGIN_SRC
+      Gaussian LU
+      0.447865 s
+      0.452270 s
+      0.477742 s
+      0.491358 s
+      0.517064 s
+      Basic Gaussian
+      0.527852 s
+      0.508105 s
+      0.525093 s
+      0.528454 s
+      0.520613 s
+      SYCL Gaussian
+      31.129002 s
+      30.702161 s
+      30.066883 s
+      30.215313 s
+      31.726896 s
+    #+END_SRC
+
+    After a short wait, I ran the exe again and the performance returned to the original level.
+    To account for this I included a "warm up" in the tests.
+    Ideally I wouldn't be doing these tests on a laptop using integrated graphics.
+    
+*** Upfront memory allocation 
+    When looking at the memory usage for CPU based Gaussian LU, we see it using a fairly consistent ~6.5 MB of memory.
+  
+    [[./images/Gaussian-lu-mem-usage.PNG]]
+
+    This is running $5 \times 10$ simulations.
+
+    When running the SYCL Gaussian LU, the memory usage looked like this:
+  
+    [[./images/SYCL-mem-usage-0.PNG]]
+
+    This was only running $2 \times 10$ simulations.
+
+    It seems very likely that each rise in memory corresponds to one simulation, with the troughs corresponding to starting a new simulation.
+    What is unclear is why the troughs seem higher after the first 10 simulations.
+    Since the memory keeps rising during a simulation, instead of being constant like in the CPU version, there must be allocations happening all throughout the simulation, and I imagine this accounts for a lot of the time spent solving.
+    One potential cause of this is that I am creating buffers in the loop of the solve, and not reusing them e.g.
+
+    #+BEGIN_SRC cpp
+      static void magnitude_row_swap(const size_t matrix_size, sycl::queue &q,
+                                     sycl::buffer<Floating, 2> &data_buf, const size_t diagonal) {
+        ...
+      
+        sycl::buffer<size_t, 1> indexesA(sycl::range<1>{items});
+        sycl::buffer<size_t, 1> indexesB(sycl::range<1>{work_items});
+      
+        ...
+          }
+      static void get_gaussian_LU(const size_t matrix_size, sycl::queue &q,
+                                  sycl::buffer<Floating, 2> &data_buf) {
+        sycl::buffer<Floating, 1> multipliers{sycl::range<1>{matrix_size - 1}};
+        for (size_t n = 0; n < matrix_size - 1; ++n) {
+          magnitude_row_swap(matrix_size, q, data_buf, n);
+          ...
+            }
+        ...
+                                                       }
+    #+END_SRC
+  
+    In this code we can see I am creating =indexesA= and =indexesB= =matrix_size-1= times.
+    For a 100 node and 300 branch system that is ($(2 \times 300+(100-1))-1 =$) 698 times!
+
+    A new git branch was created, and I moved the creation of all the buffers to the start of the solve e.g.:
+
+    #+BEGIN_SRC cpp
+      sycl::buffer<Floating, 2> LU_buf(sycl::range<2>(matrix_size, matrix_size + 1));
+      sycl::buffer<Floating, 1> multipliers{sycl::range<1>{matrix_size - 1}};
+      sycl::buffer<size_t, 1> indexesA(sycl::range<1>{matrix_size});
+      sycl::buffer<size_t, 1> indexesB(sycl::range<1>{(matrix_size/magnitude_row_swap_comparisons)+1});
+      sycl::buffer<Floating, 1> y_buf(matrix_size);
+      sycl::buffer<Floating, 1> sum_buf{sycl::range<1>{matrix_size-1}};
+      sycl::buffer<Floating, 1> scratch_buf{sycl::range<1>{(matrix_size-1)/sum_comparisons + 1}};
+      sycl::buffer<Floating, 1> x_buf(matrix_size);
+      
+      load_LU_data(matrix_size, q, LU_buf, data);
+      get_gaussian_LU(matrix_size, q, LU_buf, multipliers, indexesA, indexesB);
+      forward_propagation(matrix_size, q, LU_buf, y_buf, sum_buf, scratch_buf);
+      back_propagation(matrix_size, q, LU_buf, y_buf, x_buf, sum_buf, scratch_buf);
+    #+END_SRC
+
+    After these changes, I ran the basic performance tests again and was pleased to see the time had reduced by a third:
+
+    #+BEGIN_SRC
+    Gaussian LU
+    0.393936 s
+    0.385706 s
+    0.378607 s
+    0.383095 s
+    0.380387 s
+    Basic Gaussian
+    0.377798 s
+    0.385142 s
+    0.376836 s
+    0.372262 s
+    0.394790 s
+    SYCL Gaussian
+    17.436484 s
+    21.152747 s
+    21.075478 s
+    20.466884 s
+    20.756583 s
+    #+END_SRC
+
+    The memory usage was a different story, I seem to be using more memory now:
+
+    [[./images/SYCL-mem-usage-upfront-buffers.PNG]]
+
+    This seems to disprove my theory about the buffer creations leading to memory allocations, and I currently don't have a new idea.
+  
+    After this change, I noticed that some of the buffers could be reused in different parts of the algorithm.
+    =y_buf=, =x_buf=, =sum_buf= and =scratch_buf= are all used at the same time, but multipliers is seperate, so I removed multipliers and reused =y_buf=.
+    Reduce, Reuse, Recycle.
+
+    #+BEGIN_SRC cpp
+      sycl::buffer<Floating, 2> LU_buf(sycl::range<2>(matrix_size, matrix_size + 1));
+      
+      sycl::buffer<size_t, 1> indexesA(sycl::range<1>{matrix_size});
+      sycl::buffer<size_t, 1> indexesB(sycl::range<1>{(matrix_size/magnitude_row_swap_comparisons)+1});
+      
+      //sycl::buffer<Floating, 1> multipliers{sycl::range<1>{matrix_size - 1}};
+      sycl::buffer<Floating, 1> y_buf(matrix_size);
+      sycl::buffer<Floating, 1> x_buf(matrix_size);
+      sycl::buffer<Floating, 1> sum_buf{sycl::range<1>{matrix_size-1}};
+      sycl::buffer<Floating, 1> scratch_buf{sycl::range<1>{(matrix_size-1)/sum_comparisons + 1}};
+      
+      load_LU_data(matrix_size, q, LU_buf, data);
+      get_gaussian_LU(matrix_size, q, LU_buf, y_buf, indexesA, indexesB);
+      forward_propagation(matrix_size, q, LU_buf, y_buf, sum_buf, scratch_buf);
+      back_propagation(matrix_size, q, LU_buf, y_buf, x_buf, sum_buf, scratch_buf);
+    #+END_SRC 
+
+    This seemed to have very little affect on the memory usage:
+
+    [[./images/SYCL-mem-usage-upfront-buffers-reuse.PNG]]
+
+    It may be worth noting that the actual size of the linear systems is slightly random so a bit of variation is expected.
+    There was also no significant difference in execution time.
+  
+*** Shared Queue
+    One thing I've previously noticed is that SYCL kernels can run a lot faster the second time round.
+    For example, when experimenting with writing a sum function these were some timings I collected:
+     
+    #+BEGIN_SRC 
+    Device: Intel(R) Graphics [0x3ea0]
+    max workgroup size: 256
+    summing values from 1 to 10000007
+    cpu sum:                  50000075000028, duration 6.0704ms
+    my sycl sum<0002>:        50000075000028, duration 500.44ms
+    my sycl sum<0002>:        50000075000028, duration 30.5035ms
+    my sycl sum<0003>:        50000075000028, duration 30.6049ms
+    my sycl sum<0004>:        50000075000028, duration 33.3844ms
+    my sycl sum<0005>:        50000075000028, duration 31.1027ms
+    my sycl sum<0008>:        50000075000028, duration 26.608ms
+    my sycl sum<0016>:        50000075000028, duration 28.5056ms
+    my sycl sum<0032>:        50000075000028, duration 27.2776ms
+    my sycl sum<0064>:        50000075000028, duration 27.1687ms
+    my sycl sum<0128>:        50000075000028, duration 29.5232ms
+    sycl reduction sum<0032>: 50000075000028, duration 46.7263ms
+    sycl reduction sum<0064>: 50000075000028, duration 34.1085ms
+    sycl reduction sum<0128>: 50000075000028, duration 33.5212ms
+    sycl reduction sum<0256>: 50000075000028, duration 35.4587ms
+    #+END_SRC
+
+    The interesting thing to note here is that the first run of "my sycl sum" and "sycl reduction sum" are both noticeably longer than the rest.
+  
+    I created a new git branch, and altered the code so the sycl::queue is only created once, at the beginning.
+    Since the size of the circuit changes with each solve, new buffers are still created for every solve.
+
+    After the change, it looks like things are running a couple seconds faster:
+
+    #+BEGIN_SRC
+    SYCL Gaussian
+    19.353489 s
+    29.168286 s
+    28.522748 s
+    28.479089 s
+    28.382714 s
+    #+END_SRC
+
+    Also, the memory usage pattern seems a little different:
+
+    [[./images/SYCL-mem-usage-shared-queue.PNG]]
+
+    This maybe suggests that the higher troughs from the first build are due to creating multiple queues.
+    
+*** In-Order Queue
+     
+    Since all the operations need to happen in order, telling the runtime to not calculate the dependency graph could save work.
+    Starting from master again, I made a small change to the code, adding the =in_order= property:
+
+    #+BEGIN_SRC cpp
+      sycl::queue q{selector,
+        [](sycl::exception_list el) {
+          for (auto &&ex : el) {
+            try {
+              std::rethrow_exception(ex);
+            } catch (sycl::exception const &e) {
+              std::fputs("Caught asynchronous SYCL exception: ", stdout);
+              std::puts(e.what());
+            }
+          }
+        },
+        sycl::property_list{sycl::property::queue::in_order()}};
+    #+END_SRC
+
+    This seemed to make very litte difference to performance.
+
+    #+BEGIN_SRC
+      Gaussian LU
+      0.394176 s
+      0.384884 s
+      0.384721 s
+      0.375061 s
+      0.377780 s
+      Basic Gaussian
+      0.377460 s
+      0.375429 s
+      0.384889 s
+      0.375361 s
+      0.379679 s
+      SYCL Gaussian
+      21.597300 s
+      30.577833 s
+      30.379041 s
+      30.728563 s
+      31.372283 s
+    #+END_SRC
+     
+    The memory usage in this case was quite odd:
+
+    [[./images/SYCL-mem-usage-in-order.PNG]]
+
+    It seems to rise a lot over time, as if I had a memory leak. I am really not sure why this is.
+    Since in-order queue isn't directly portable to ComputeCpp, I will leave this out of my implemenation.
+    
+*** All together
+    
+    I put everything together and was happy to see it works best with everything.
+    While I did acheive some modest improvements, it's clear that the current overhead of SYCL is still too high for this problem.
+    Potentially when there is more work to do (dynamic and non-linear equations, or bigger circuits), it will be more suited.
+
+** Performance - Part 2
+
+   Looking at an analysis of CPU usage during the run, a single CPU seemed to be working throughout the simulation.
+   My next guess to improve the performance was to try to use fewer, larger kernels, to save work submitting the kernels.
+   Unfortunately, many of the steps depended on the result of the previous step, and since there is no `global barrier' the only solution is to submit a new kernel.
+    
+   Something that can be done in fewer steps is the reduction computation.
+   In the forward and back propagation there is a sum function, and in the LU decomposition there is something like a =std::max_element=.
+   Each of the functions instructs each work-item to reduce =n= values from an input buffer and put the result in an output buffer, then the kernel is run again but the input and output buffers have swapped roles.
+   A list of m operations would be reduced to a single value in $log_n{m}$ kernel executions, so a greater n would lead to fewer kernel submissions.
+    
+   Following is a table of the results of that experiment. =n= went up then down again to try to avoid the affects of thermal throttling.
+ 
+   | reduction per work-item | run 1 | run 2 | run 3 | run 4 | run 5 |   mean |
+   |-------------------------+-------+-------+-------+-------+-------+--------|
+   |                       / |     < |       |       |       |       |      < |
+   |           warm up     2 | 14.31 | 17.42 | 17.60 | 17.66 | 17.12 | 16.822 |
+   |                       2 | 16.66 | 16.93 | 16.69 | 16.62 | 16.68 | 16.716 |
+   |                       4 | 12.02 | 11.94 | 11.92 | 12.10 | 12.03 | 12.002 |
+   |                       8 | 10.16 | 12.71 | 11.52 | 11.16 | 11.15 |  11.34 |
+   |                      16 | 10.19 | 10.31 | 10.31 | 10.25 | 10.28 | 10.268 |
+   |                      32 |  8.74 |  8.80 |  9.00 |  8.85 |  8.86 |   8.85 |
+   |                      64 |  8.71 |  8.66 |  9.01 |  8.76 |  8.73 |  8.774 |
+   |                     128 |  8.64 |  8.65 |  8.69 |  8.60 |  8.61 |  8.638 |
+   |                     128 |  8.60 |  8.62 |  8.73 |  8.42 |  8.15 |  8.504 |
+   |                      64 |  8.18 |  8.22 |  8.21 |  8.14 |  8.25 |    8.2 |
+   |                      32 |  8.22 |  8.15 |  8.17 |  8.24 |  8.23 |  8.202 |
+   |                      16 |  9.50 |  9.57 |  9.62 |  9.53 |  9.57 |  9.558 |
+   |                       8 | 10.37 | 10.28 | 10.20 | 10.31 | 10.32 | 10.296 |
+   |                       4 | 12.22 | 12.08 | 12.05 | 13.90 | 13.35 |  12.72 |
+   |                       2 | 19.54 | 19.61 | 19.57 | 19.54 | 19.44 |  19.54 |
+   #+TBLFM: $7=vmean($2..$6)   
+
+   The returns greatly diminish after 32, but it is still a great performance boost!
+   In the future, run time could possibly be reduced further using atomics or the built-in SYCL reduce feature.
