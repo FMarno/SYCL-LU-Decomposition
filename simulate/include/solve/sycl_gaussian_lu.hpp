@@ -150,8 +150,7 @@ namespace Solve {
     // multipliers should be at least matrix_size - 1 long
     // indexesA should be at least matrix_size long
     // indexesB should be at least matrix_size/magnitude_row_swap_comparisons + 1  long
-    static void get_gaussian_LU(const size_t matrix_size, sycl::queue &q, sycl::buffer<Floating, 2> &data_buf,
-                                sycl::buffer<Floating, 1> multipliers, sycl::buffer<size_t, 1> indexesA,
+    static void get_gaussian_LU(const size_t matrix_size, sycl::queue &q, sycl::buffer<Floating, 2> &data_buf, sycl::buffer<size_t, 1> indexesA,
                                 sycl::buffer<size_t, 1> indexesB) {
         for (size_t n = 0; n < matrix_size - 1; ++n) {
             magnitude_row_swap(matrix_size, q, data_buf,indexesA, indexesB, n);
@@ -160,34 +159,20 @@ namespace Solve {
             const size_t num_of_multipliers = matrix_size - n - 1;
             q.submit([&, n](sycl::handler &h) {
                 auto multiplier_range = sycl::range<1>{num_of_multipliers};
-                auto acc_multiplier = multipliers.template get_access<sycl::access::mode::discard_write>(h, multiplier_range);
-                auto acc_data = data_buf.template get_access<sycl::access::mode::read>(h);
+                auto acc_data = data_buf.template get_access<sycl::access::mode::read_write>(h);
                 h.parallel_for<class CalcMultipliers<Floating, comps>>(multiplier_range, [=](sycl::id<1> id) {
                     auto row = n + 1 + id[0];
-                    acc_multiplier[id] = acc_data[row][n] / acc_data[n][n];
-                });
-            });
-
-            // fill in the L values
-            q.submit([&, n](sycl::handler &h) {
-                auto acc_multiplier = multipliers.template get_access<sycl::access::mode::read>(h);
-                auto acc_data = data_buf.template get_access<sycl::access::mode::write>(h);
-
-                auto multiplier_range = sycl::range<1>{num_of_multipliers};
-                h.parallel_for<class FillL<Floating, comps>>(multiplier_range, [=](sycl::id<1> id) {
-                    const auto row = n + 1 + id[0];
-                    acc_data[row][n] = acc_multiplier[id];
+                    acc_data[row][n] = acc_data[row][n] / acc_data[n][n];
                 });
             });
 
             // prepare U values
             q.submit([&, n](sycl::handler &h) {
-                auto acc_multiplier = multipliers.template get_access<sycl::access::mode::read>(h);
                 auto acc_data = data_buf.template get_access<sycl::access::mode::read_write>(h);
                 h.parallel_for<class FillU<Floating, comps>>(sycl::range<2>{num_of_multipliers, num_of_multipliers}, [=](sycl::id<2> id) {
                     auto row = n + 1 + id[0];
                     auto column = n + 1 + id[1];
-                    acc_data[row][column] = acc_data[row][column] - acc_multiplier[id[0]] * acc_data[n][column];
+                    acc_data[row][column] = acc_data[row][column] - acc_data[row][n] * acc_data[n][column];
                 });
             });
         }
@@ -327,14 +312,13 @@ namespace Solve {
         sycl::buffer<size_t, 1> indexesA(sycl::range<1>{matrix_size});
         sycl::buffer<size_t, 1> indexesB(sycl::range<1>{(matrix_size/magnitude_row_swap_comparisons)+1});
 
-        //sycl::buffer<Floating, 1> multipliers{sycl::range<1>{matrix_size - 1}};
         sycl::buffer<Floating, 1> y_buf(matrix_size);
         sycl::buffer<Floating, 1> x_buf(matrix_size);
         sycl::buffer<Floating, 1> sum_buf{sycl::range<1>{matrix_size-1}};
         sycl::buffer<Floating, 1> scratch_buf{sycl::range<1>{(matrix_size-1)/sum_comparisons + 1}};
 
         load_LU_data(matrix_size, q, LU_buf, data);
-        get_gaussian_LU(matrix_size, q, LU_buf, y_buf, indexesA, indexesB);
+        get_gaussian_LU(matrix_size, q, LU_buf, indexesA, indexesB);
         forward_propagation(matrix_size, q, LU_buf, y_buf, sum_buf, scratch_buf);
         back_propagation(matrix_size, q, LU_buf, y_buf, x_buf, sum_buf, scratch_buf);
 
@@ -355,10 +339,9 @@ namespace Solve {
         sycl::buffer<Floating, 2> LU_buf(sycl::range<2>(matrix_size, matrix_size + 1));
         load_LU_data(matrix_size, q, LU_buf, data);
 
-        sycl::buffer<Floating, 1> multipliers{sycl::range<1>{matrix_size - 1}};
         sycl::buffer<size_t, 1> indexesA(sycl::range<1>{matrix_size});
         sycl::buffer<size_t, 1> indexesB(sycl::range<1>{(matrix_size/magnitude_row_swap_comparisons)+1});
-        get_gaussian_LU(matrix_size, q, LU_buf, multipliers, indexesA, indexesB);
+        get_gaussian_LU(matrix_size, q, LU_buf, indexesA, indexesB);
         // TODO do this on GPU
         auto s = LU_buf.template get_access<sycl::access::mode::read>();
         auto product = Floating{1};

@@ -210,10 +210,9 @@ std::optional<std::string> test_LU_decomposition(sycl::queue &q) {
     Solver::load_LU_data(matrix_size, q, lu_buf, test_data);
 
     // run
-    sycl::buffer<Floating, 1> multipliers{sycl::range<1>{matrix_size - 1}};
     sycl::buffer<size_t, 1> indexesA(sycl::range<1>{matrix_size});
     sycl::buffer<size_t, 1> indexesB(sycl::range<1>{(matrix_size/Solver::magnitude_row_swap_comparisons)+1});
-    Solver::get_gaussian_LU(matrix_size, q, lu_buf, multipliers, indexesA, indexesB);
+    Solver::get_gaussian_LU(matrix_size, q, lu_buf, indexesA, indexesB);
 
     // check result
     auto host_acc_lu = lu_buf.template get_access<sycl::access::mode::read>();
