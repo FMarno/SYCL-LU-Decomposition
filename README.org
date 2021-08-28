@@ -12,6 +12,11 @@
 
   This work is part of my MSc project investigating the suitability of SYCL for solving these problems, as well as for scientific computing in general.
   
+* Flow chart of SYCL implementation
+SYCL kernels are represented by boxes with double vertical edges.
+
+[[./flowchart.pdf]]
+  
 
 * Build
   The build has been set up to work with DPC++ and ComputeCpp on Windows, unfortunately the ComputeCpp build isn't currently working.
