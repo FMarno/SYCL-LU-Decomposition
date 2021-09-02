@@ -384,4 +384,4 @@ build\simulate\test\Release\simulate_test.exe
    In the future, run time could possibly be reduced further using atomics or the built-in SYCL reduce feature.
 
 * Acknowledgement
-This work was performed as part of the MSc degree in Sensors and Imaging System at The University of Edinburgh under supervision of @danchitnis
+This work was performed as part of the MSc degree in Sensors and Imaging System at The University of Edinburgh under supervision of [[https://github.com/danchitnis/][@danchitnis]]
