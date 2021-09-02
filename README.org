@@ -382,3 +382,6 @@ build\simulate\test\Release\simulate_test.exe
 
    The returns greatly diminish after 32, but it is still a great performance boost!
    In the future, run time could possibly be reduced further using atomics or the built-in SYCL reduce feature.
+
+* Acknowledgement
+This work was performed as part of the MSc degree in Sensors and Imaging System at The University of Edinburgh under supervision of @danchitnis
