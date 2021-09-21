@@ -6,6 +6,10 @@
 #include <vector>
 
 namespace Graph {
+  namespace {
+    template <class> inline constexpr bool always_false_v = false;
+  }
+
 template <typename Floating> struct Resistor { Floating value; };
 
 template <typename Floating> struct VoltageSource { Floating value; };
@@ -39,7 +43,7 @@ using Component =
     std::variant<Resistor<F>, VoltageSource<F>, CurrentSource<F>, VoltageControlledVoltageSource<F>,
                  VoltageControlledCurrentSource<F>, CurrentControlledVoltageSource<F>, CurrentControlledCurrentSource<F>>;
 
-template <typename F> std::string to_string(Component<F> component) noexcept {
+template <typename Floating> std::string to_string(Component<Floating> component) noexcept {
     return std::visit(
         [](auto &&arg) {
             using T = std::decay_t<decltype(arg)>;

@@ -1,5 +1,4 @@
 #include <cstdio>
-#include <memory_resource>
 
 #include "graph/circuit_gen.hpp"
 #include "graph/graph.hpp"
@@ -22,7 +21,7 @@ template <typename FloatType, typename Solver> void time_solver(Solver solve) {
     for (int n = 0; n < 5; ++n) {
         auto start = clock::now();
         for (int i = 0; i < 10; ++i) {
-            auto graph = Graph::generate_circuit<FloatType>(100, 300);
+            auto graph = Graph::generate_circuit<FloatType>(10, 30);
             auto system = Graph::graph_to_sta_system(graph);
             auto solution = solve(std::move(system));
         }
@@ -55,6 +54,6 @@ int main() {
                       }
                   }};
 
-    std::puts("Gaussian LU");
+    std::puts("SYCL Gaussian LU");
     time_solver<FloatType>([&q](auto system) { return Solve::SYCL_Gaussian_LU<FloatType>::solve(q, std::move(system)); });
 }

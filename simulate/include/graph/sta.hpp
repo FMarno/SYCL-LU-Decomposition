@@ -13,10 +13,6 @@ using Solve::row;
 
 namespace Graph {
 
-namespace {
-template <class> inline constexpr bool always_false_v = false;
-}
-
 // convert a graph to a linear system
 template <typename Floating> matrix<Floating> graph_to_sta_system(const Branches<Floating> &branches) {
     const auto num_of_nodes = count_nodes(branches.paths);
@@ -98,10 +94,10 @@ inline std::size_t count_nodes(const std::vector<Path> &paths) noexcept {
 
 // prints out the result of a solve in a nice format
 template <typename Floating> void sta_print_solution(const Branches<Floating> &branches, const std::vector<Floating> &solution) {
-    auto &path = branches.paths;
+    auto &paths = branches.paths;
     auto &components = branches.components;
-    const auto num_of_nodes = count_nodes(branches.paths);
-    const auto num_of_branches = branches.paths.size();
+    const auto num_of_nodes = count_nodes(paths);
+    const auto num_of_branches = paths.size();
     const auto matrix_size = 2 * num_of_branches + num_of_nodes - 1;
     std::stringstream ss;
     for (size_t i = 0; i < num_of_branches; ++i) {

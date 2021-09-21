@@ -2,6 +2,7 @@
 #pragma once
 #include <iomanip>
 #include <vector>
+#include <algorithm>
 
 namespace Solve {
 
